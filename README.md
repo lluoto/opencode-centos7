@@ -242,3 +242,8 @@ docker run --rm -it --privileged ...
 ## License
 
 MIT
+
+
+######
+2026.5.16 修改
+调整脚本，可以摆脱对patchelf的依赖，实现启动，也就是借用原有的数据库安装，
