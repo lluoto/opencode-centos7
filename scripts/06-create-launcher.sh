@@ -18,25 +18,23 @@ fi
 log_info "创建启动脚本..."
 cat > "$BIN_DIR/opencode" << 'LAUNCHER_EOF'
 #!/bin/bash
-# OpenCode Launcher - 基于 opencode-on-centos7 方案修复版
+# OpenCode Launcher - 终极方案 (废弃 patchelf，使用 ld.so 原生重定向)
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OPENCODE_DIR="$(dirname "$SCRIPT_DIR")"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+OPENCODE_DIR="$( dirname "$SCRIPT_DIR" )"
 
-# 检查安装目录
 if [[ ! -d "$OPENCODE_DIR" ]]; then
     echo "错误：未找到 OpenCode 安装目录 $OPENCODE_DIR"
     exit 1
 fi
 
-# 定义清理函数
 cleanup_terminal() {
     # 重置终端鼠标事件跟踪
     echo -e '\033[?1000h\033[?1002h\033[?1003h' 2>/dev/null || true
+    # 恢复终端正常状态，防止崩溃后乱码
+    stty sane 2>/dev/null || true
 }
-
-# 设置 trap 确保退出时清理
 trap cleanup_terminal EXIT INT TERM
 
 # 禁用鼠标事件跟踪（防止终端异常）
@@ -44,71 +42,54 @@ echo -e '\033[?1000l\033[?1002l\033[?1003l\033[?1005l\033[?1006l' 2>/dev/null ||
 
 # 关键路径
 GLIBC_LOADER="$OPENCODE_DIR/gnu/lib/ld-linux-x86-64.so.2"
-OPENCODE_BAK="$OPENCODE_DIR/bin/opencode.bak"
-PATCHELF="$OPENCODE_DIR/gnu/bin/patchelf"
+OPENCODE_BIN="$OPENCODE_DIR/bin/opencode.bak"
 
-# 检查必要文件
 if [[ ! -f "$GLIBC_LOADER" ]]; then
     echo "错误：未找到 glibc loader: $GLIBC_LOADER"
     exit 1
 fi
 
-if [[ ! -f "$OPENCODE_BAK" ]]; then
-    echo "错误：未找到 OpenCode 备份文件：$OPENCODE_BAK"
+if [[ ! -f "$OPENCODE_BIN" ]]; then
+    echo "错误：未找到 OpenCode 备份文件：$OPENCODE_BIN"
     exit 1
 fi
 
-# 创建临时目录
-TEMP_DIR=$(mktemp -d)
-TEMP_OPENCODE="$TEMP_DIR/opencode"
-
-# 复制备份到临时目录
-cp "$OPENCODE_BAK" "$TEMP_OPENCODE"
-
-# 使用 patchelf 修改 interpreter
-if [[ -f "$PATCHELF" ]]; then
-    "$PATCHELF" --set-interpreter "$GLIBC_LOADER" "$TEMP_OPENCODE" 2>/dev/null || {
-        echo "警告：patchelf 修改失败，尝试直接运行..."
-    }
-fi
-
 # 保存原始环境变量
-ORIGINAL_LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
-ORIGINAL_LANG="$LANG"
-ORIGINAL_TERM="$TERM"
-ORIGINAL_LOCPATH="$LOCPATH"
+ORIGINAL_LANG="${LANG:-}"
+ORIGINAL_TERM="${TERM:-}"
+ORIGINAL_LOCPATH="${LOCPATH:-}"
+
+# 运行前：彻底清空所有可能污染 glibc 加载的系统环境变量
+unset LD_LIBRARY_PATH
+unset LD_PRELOAD
 
 # 设置安全的环境变量
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
 export TERM=xterm-256color
 
-# 关键：不设置 glibc 的 LD_LIBRARY_PATH
-# OpenCode 通过 patchelf 修改的 interpreter 自动找到自定义 glibc
-# 只设置 gnu/lib64 用于 libgcc_s.so.1（pthread_cancel 需要）
-export LD_LIBRARY_PATH="$OPENCODE_DIR/gnu/lib64"
-
-# 设置 locale 路径（如果存在）
+# 设置 locale 路径
 if [[ -d "$OPENCODE_DIR/gnu/lib/locale" ]]; then
     export LOCPATH="$OPENCODE_DIR/gnu/lib/locale"
 fi
 
-# 运行 OpenCode
-"$TEMP_OPENCODE" "$@"
+# ==============================================================================
+# 核心启动逻辑：使用新版 ld.so 直接引导程序并指定库搜索路径
+# --library-path 强制程序优先寻找 gnu/lib 和 gnu/lib64，完美替代 RPATH
+# ==============================================================================
+echo "信息：正在启动 OpenCode..."
+"$GLIBC_LOADER" --library-path "$OPENCODE_DIR/gnu/lib:$OPENCODE_DIR/gnu/lib64" "$OPENCODE_BIN" "$@"
 RETURN_CODE=$?
 
 # 恢复原始环境变量
-export LD_LIBRARY_PATH="$ORIGINAL_LD_LIBRARY_PATH"
 export LANG="$ORIGINAL_LANG"
 export TERM="$ORIGINAL_TERM"
+
 if [[ -n "$ORIGINAL_LOCPATH" ]]; then
     export LOCPATH="$ORIGINAL_LOCPATH"
 else
     unset LOCPATH
 fi
-
-# 后台清理临时文件
-( sleep 0.2; rm -rf "$TEMP_DIR" ) 2>/dev/null &
 
 exit $RETURN_CODE
 LAUNCHER_EOF
