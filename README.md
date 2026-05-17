@@ -247,3 +247,9 @@ MIT
 ######
 2026.5.16 修改
 调整脚本，可以摆脱对patchelf的依赖，实现启动，也就是借用原有的数据库安装，
+cd gcc-9.5.0
+./contrib/download_prerequisites预安装gcc前置
+ ssh -L 2048:127.0.0.1:2048 root@net8(vmwareip)进行端口穿透
+ 然后使用OPENCODE_SERVER_PASSWARD="PASSWARD" opencode serve --hostname 127.0.0.1 --port 2048 启动虚拟机内cli，再添加model（授权copy）
+ 使用opencode attach http://127.0.0.1:2048 -p "PASSWARD"进行激活，达到在shell中进行虚拟机agent操作
+ 
